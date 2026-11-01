@@ -1,9 +1,11 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>The Direct Hotline</title>
+
   <style>
     * { box-sizing: border-box; }
 
@@ -54,6 +56,14 @@
       margin-right: auto;
     }
 
+    .message-image {
+      display: block;
+      max-width: 100%;
+      max-height: 300px;
+      border-radius: 8px;
+      margin-top: 8px;
+    }
+
     form {
       display: flex;
       gap: 10px;
@@ -61,9 +71,10 @@
       max-width: 850px;
       padding: 16px;
       margin: 0 auto;
+      align-items: center;
     }
 
-    input {
+    #message {
       flex: 1;
       min-width: 0;
       padding: 15px;
@@ -75,19 +86,44 @@
       outline: none;
     }
 
-    button {
-      padding: 0 20px;
+    button, .upload-label {
+      padding: 14px 17px;
       border: 0;
       border-radius: 10px;
       background: #eeeeee;
       color: #111;
       font-weight: bold;
       cursor: pointer;
+      white-space: nowrap;
     }
 
     button:disabled {
       opacity: 0.5;
       cursor: not-allowed;
+    }
+
+    #image-input {
+      display: none;
+    }
+
+    #preview-area {
+      display: none;
+      max-width: 850px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 0 16px 10px;
+    }
+
+    #preview {
+      max-width: 130px;
+      max-height: 100px;
+      border-radius: 8px;
+      vertical-align: middle;
+    }
+
+    #remove-image {
+      margin-left: 8px;
+      padding: 8px 12px;
     }
 
     #status {
@@ -96,62 +132,200 @@
       font-size: 12px;
       padding-bottom: 10px;
     }
+
+    @media (max-width: 500px) {
+      form { gap: 6px; padding: 10px; }
+      button, .upload-label { padding: 13px 11px; }
+    }
   </style>
 </head>
+
 <body>
   <header>The Direct Hotline</header>
 
   <main id="chat">
-    <div class="message bot">Welcome to The Direct Hotline. What's on your mind?</div>
+    <div class="message bot">
+      Welcome to The Direct Hotline. What's on your mind?
+    </div>
   </main>
+
+  <div id="preview-area">
+    <img id="preview" alt="Image preview">
+    <button id="remove-image" type="button">Remove</button>
+  </div>
 
   <div id="status">Ready</div>
 
   <form id="form">
-    <input id="message" placeholder="Message The Direct Hotline..." autocomplete="off" required>
+    <label class="upload-label" for="image-input">+ Image</label>
+
+    <input
+      id="image-input"
+      type="file"
+      accept="image/jpeg,image/png,image/webp"
+    >
+
+    <input
+      id="message"
+      placeholder="Message The Direct Hotline..."
+      autocomplete="off"
+    >
+
     <button id="send" type="submit">Send</button>
   </form>
 
   <script>
-    // Replace this with your Cloudflare Worker URL after creating it.
-    const API_URL = "https://direct-hotline-api.roger-from-bloombuild.workers.dev";
+    const API_URL =
+      "https://direct-hotline-api.roger-from-bloombuild.workers.dev";
+
     const chat = document.getElementById("chat");
     const form = document.getElementById("form");
     const input = document.getElementById("message");
     const send = document.getElementById("send");
     const status = document.getElementById("status");
 
-    const messages = [];
+    const imageInput = document.getElementById("image-input");
+    const previewArea = document.getElementById("preview-area");
+    const preview = document.getElementById("preview");
+    const removeImage = document.getElementById("remove-image");
 
-    function addMessage(text, type) {
+    const messages = [];
+    let selectedImage = null;
+
+    function addMessage(text, type, image = null) {
       const div = document.createElement("div");
       div.className = "message " + type;
-      div.textContent = text;
+
+      if (text) {
+        const textNode = document.createElement("div");
+        textNode.textContent = text;
+        div.appendChild(textNode);
+      }
+
+      if (image) {
+        const img = document.createElement("img");
+        img.src = image;
+        img.className = "message-image";
+        img.alt = "Uploaded image";
+        div.appendChild(img);
+      }
+
       chat.appendChild(div);
       chat.scrollTop = chat.scrollHeight;
     }
+
+    function clearImage() {
+      selectedImage = null;
+      imageInput.value = "";
+      preview.src = "";
+      previewArea.style.display = "none";
+    }
+
+    imageInput.addEventListener("change", async () => {
+      const file = imageInput.files[0];
+
+      if (!file) return;
+
+      if (!file.type.startsWith("image/")) {
+        status.textContent = "Please select an image.";
+        clearImage();
+        return;
+      }
+
+      if (file.size > 10 * 1024 * 1024) {
+        status.textContent = "Image is too large. Choose one under 10 MB.";
+        clearImage();
+        return;
+      }
+
+      try {
+        status.textContent = "Preparing image...";
+
+        const image = await createCompressedImage(file);
+
+        if (image.length > 3000000) {
+          throw new Error("Image is too large. Try a smaller image.");
+        }
+
+        selectedImage = image;
+        preview.src = image;
+        previewArea.style.display = "block";
+        status.textContent = "Image ready";
+      } catch (error) {
+        clearImage();
+        status.textContent = error.message || "Could not load image.";
+      }
+    });
+
+    function createCompressedImage(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+
+        reader.onload = () => {
+          const img = new Image();
+
+          img.onload = () => {
+            const canvas = document.createElement("canvas");
+
+            const maxDimension = 1280;
+            const scale = Math.min(
+              1,
+              maxDimension / Math.max(img.width, img.height)
+            );
+
+            canvas.width = Math.round(img.width * scale);
+            canvas.height = Math.round(img.height * scale);
+
+            const context = canvas.getContext("2d");
+            context.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+            resolve(canvas.toDataURL("image/jpeg", 0.8));
+          };
+
+          img.onerror = () => reject(new Error("Could not read image."));
+          img.src = reader.result;
+        };
+
+        reader.onerror = () => reject(new Error("Could not read image."));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    removeImage.addEventListener("click", clearImage);
 
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
 
       const text = input.value.trim();
-      if (!text || send.disabled) return;
+      const image = selectedImage;
 
-      if (API_URL.includes("PASTE_YOUR")) {
-        status.textContent = "Set your Cloudflare Worker URL in the code first.";
-        return;
+      if ((!text && !image) || send.disabled) return;
+
+      addMessage(text, "user", image);
+
+      const userMessage = {
+        role: "user",
+        content: text || "Please describe this image."
+      };
+
+      if (image) {
+        userMessage.image = image;
       }
 
-      addMessage(text, "user");
-      messages.push({ role: "user", content: text });
+      messages.push(userMessage);
+
       input.value = "";
+      clearImage();
+
       send.disabled = true;
       status.textContent = "Thinking...";
 
       try {
         const response = await fetch(API_URL + "/chat", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json"
+          },
           body: JSON.stringify({ messages })
         });
 
@@ -161,18 +335,30 @@
           throw new Error(data.error || "The server returned an error.");
         }
 
-        const reply = data.reply || "I couldn't generate a response.";
-        addMessage(reply, "bot");
-        messages.push({ role: "assistant", content: reply });
+        const reply =
+          data.reply || "I couldn't generate a response.";
 
-        // Keep the conversation history from growing forever.
-        if (messages.length > 20) messages.splice(0, 2);
+        addMessage(reply, "bot");
+        messages.push({
+          role: "assistant",
+          content: reply
+        });
+
+        if (messages.length > 20) {
+          messages.splice(0, 2);
+        }
 
         status.textContent = "Ready";
+
       } catch (error) {
-        addMessage("Sorry, something went wrong. " + error.message, "bot");
+        addMessage(
+          "Sorry, something went wrong. " + error.message,
+          "bot"
+        );
+
         messages.pop();
         status.textContent = "Connection error";
+
       } finally {
         send.disabled = false;
         input.focus();
